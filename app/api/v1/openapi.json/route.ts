@@ -1812,6 +1812,7 @@ const spec = {
           path: { type: "string", example: "/ws/*", description: "Caddy path pattern to match" },
           upstreams: { type: "array", items: { type: "string" }, example: ["ws-backend:8080", "ws-backend2:8080"], description: "Upstream servers for this path" },
           loadBalancer: { oneOf: [{ $ref: "#/components/schemas/LoadBalancerConfig" }, { type: "null" }], description: "Optional per-rule load balancing and health checks for this path's upstreams" },
+          rewriteTo: { type: "string", nullable: true, example: "/repository/docker_io/v2", description: "Rewrites the matched path prefix (this rule's `path` with a trailing \"/*\" or \"*\" removed) before proxying. Omit/null: forward the path unchanged. Empty string: strip the matched prefix (nginx trailing-slash proxy_pass equivalent). Any other value: replace the matched prefix with it (proxy_pass URI remap)." },
         },
         required: ["path", "upstreams"],
       },

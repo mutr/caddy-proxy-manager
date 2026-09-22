@@ -805,12 +805,28 @@ export function buildLocationReverseProxy(
   rule: LocationRuleMeta,
   skipHttpsValidation: boolean,
   preserveHostHeader: boolean
-): { safePath: string; reverseProxyHandler: Record<string, unknown> } {
+): { safePath: string; reverseProxyHandler: Record<string, unknown>; rewriteHandler: Record<string, unknown> | null } {
   const parsedTargets = rule.upstreams.map(parseUpstreamTarget);
   const hasHttps = parsedTargets.some((t) => t.scheme === "https");
 
   // Sanitize path to prevent Caddy placeholder injection
   const safePath = rule.path.replace(/\{[^}]*\}/g, "");
+
+  // Optional path-prefix rewrite, applied before the reverse_proxy handler.
+  // rewrite_to === "" strips the rule's matched prefix (nginx trailing-slash
+  // proxy_pass equivalent); a non-empty value replaces the prefix (proxy_pass
+  // URI remap, e.g. Docker registry -> Nexus). Matched prefix is the rule's
+  // path with a trailing "/*" or "*" removed.
+  let rewriteHandler: Record<string, unknown> | null = null;
+  if (typeof rule.rewrite_to === "string") {
+    const matchPrefix = safePath.replace(/\/?\*+$/, "");
+    if (matchPrefix) {
+      rewriteHandler = {
+        handler: "rewrite",
+        uri_substring: [{ find: matchPrefix, replace: rule.rewrite_to, limit: 1 }],
+      };
+    }
+  }
 
   const reverseProxyHandler: Record<string, unknown> = {
     handler: "reverse_proxy",
@@ -843,7 +859,7 @@ export function buildLocationReverseProxy(
     }
   }
 
-  return { safePath, reverseProxyHandler };
+  return { safePath, reverseProxyHandler, rewriteHandler };
 }
 
 // Builds a Caddy server-level error route (handle_errors equivalent) that serves a
@@ -1336,7 +1352,7 @@ async function buildProxyRoutes(
           // behavior when protected_paths is configured — only explicitly protected paths get auth.
           const locationRules = meta.location_rules ?? [];
           for (const rule of locationRules) {
-            const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+            const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
               rule,
               Boolean(row.skipHttpsHostnameValidation),
               Boolean(row.preserveHostHeader)
@@ -1344,7 +1360,7 @@ async function buildProxyRoutes(
             if (!safePath) continue;
             hostRoutes.push({
               match: [{ host: domainGroup, path: [safePath] }],
-              handle: [...handlers, locationProxy],
+              handle: [...handlers, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
               terminal: true,
             });
           }
@@ -1383,7 +1399,7 @@ async function buildProxyRoutes(
 
           // Location rules get auth (same as full-site mode)
           for (const rule of locationRules) {
-            const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+            const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
               rule,
               Boolean(row.skipHttpsHostnameValidation),
               Boolean(row.preserveHostHeader)
@@ -1391,7 +1407,7 @@ async function buildProxyRoutes(
             if (!safePath) continue;
             hostRoutes.push({
               match: [{ host: domainGroup, path: [safePath] }],
-              handle: [...handlers, forwardAuthHandler, locationProxy],
+              handle: [...handlers, forwardAuthHandler, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
               terminal: true,
             });
           }
@@ -1419,7 +1435,7 @@ async function buildProxyRoutes(
           }
 
           for (const rule of locationRules) {
-            const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+            const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
               rule,
               Boolean(row.skipHttpsHostnameValidation),
               Boolean(row.preserveHostHeader)
@@ -1427,7 +1443,7 @@ async function buildProxyRoutes(
             if (!safePath) continue;
             hostRoutes.push({
               match: [{ host: domainGroup, path: [safePath] }],
-              handle: [...handlers, forwardAuthHandler, locationProxy],
+              handle: [...handlers, forwardAuthHandler, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
               terminal: true,
             });
           }
@@ -1523,7 +1539,7 @@ async function buildProxyRoutes(
           // Location rules are unprotected (no forward auth), matching the
           // catch-all behavior in whitelist mode.
           for (const rule of locationRules) {
-            const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+            const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
               rule,
               Boolean(row.skipHttpsHostnameValidation),
               Boolean(row.preserveHostHeader)
@@ -1531,7 +1547,7 @@ async function buildProxyRoutes(
             if (!safePath) continue;
             hostRoutes.push({
               match: [{ host: domainGroup, path: [safePath] }],
-              handle: [...faHandlers, locationProxy],
+              handle: [...faHandlers, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
               terminal: true
             });
           }
@@ -1553,7 +1569,7 @@ async function buildProxyRoutes(
           }
 
           for (const rule of locationRules) {
-            const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+            const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
               rule,
               Boolean(row.skipHttpsHostnameValidation),
               Boolean(row.preserveHostHeader)
@@ -1562,18 +1578,18 @@ async function buildProxyRoutes(
             if (apiFaHandler) {
               hostRoutes.push({
                 match: [{ host: domainGroup, path: [safePath], ...browserMatcher }],
-                handle: [...faHandlers, browserFaHandler, locationProxy],
+                handle: [...faHandlers, browserFaHandler, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
                 terminal: true
               });
               hostRoutes.push({
                 match: [{ host: domainGroup, path: [safePath] }],
-                handle: [...faHandlers, apiFaHandler, JSON.parse(JSON.stringify(locationProxy))],
+                handle: [...faHandlers, apiFaHandler, ...(rewriteHandler ? [JSON.parse(JSON.stringify(rewriteHandler))] : []), JSON.parse(JSON.stringify(locationProxy))],
                 terminal: true
               });
             } else {
               hostRoutes.push({
                 match: [{ host: domainGroup, path: [safePath] }],
-                handle: [...faHandlers, browserFaHandler, locationProxy],
+                handle: [...faHandlers, browserFaHandler, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
                 terminal: true
               });
             }
@@ -1756,7 +1772,7 @@ async function buildProxyRoutes(
 
             // Location rules (unprotected)
             for (const rule of locationRules) {
-              const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+              const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
                 rule,
                 Boolean(row.skipHttpsHostnameValidation),
                 Boolean(row.preserveHostHeader)
@@ -1764,7 +1780,7 @@ async function buildProxyRoutes(
               if (!safePath) continue;
               hostRoutes.push({
                 match: [{ host: domainGroup, path: [safePath] }],
-                handle: [...cpmHandlers, locationProxy],
+                handle: [...cpmHandlers, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
                 terminal: true
               });
             }
@@ -1796,7 +1812,7 @@ async function buildProxyRoutes(
 
             // Location rules with forward auth
             for (const rule of locationRules) {
-              const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+              const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
                 rule,
                 Boolean(row.skipHttpsHostnameValidation),
                 Boolean(row.preserveHostHeader)
@@ -1804,7 +1820,7 @@ async function buildProxyRoutes(
               if (!safePath) continue;
               hostRoutes.push({
                 match: [{ host: domainGroup, path: [safePath] }],
-                handle: [...cpmHandlers, cpmForwardAuthHandler, locationProxy],
+                handle: [...cpmHandlers, cpmForwardAuthHandler, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
                 terminal: true
               });
             }
@@ -1827,7 +1843,7 @@ async function buildProxyRoutes(
 
             // Location rules with forward auth
             for (const rule of locationRules) {
-              const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+              const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
                 rule,
                 Boolean(row.skipHttpsHostnameValidation),
                 Boolean(row.preserveHostHeader)
@@ -1835,7 +1851,7 @@ async function buildProxyRoutes(
               if (!safePath) continue;
               hostRoutes.push({
                 match: [{ host: domainGroup, path: [safePath] }],
-                handle: [...cpmHandlers, cpmForwardAuthHandler, locationProxy],
+                handle: [...cpmHandlers, cpmForwardAuthHandler, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
                 terminal: true
               });
             }
@@ -1944,7 +1960,7 @@ async function buildProxyRoutes(
           }
 
           for (const rule of locationRules) {
-            const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+            const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
               rule,
               Boolean(row.skipHttpsHostnameValidation),
               Boolean(row.preserveHostHeader)
@@ -1952,7 +1968,7 @@ async function buildProxyRoutes(
             if (!safePath) continue;
             hostRoutes.push({
               match: [{ host: domainGroup, path: [safePath] }],
-              handle: [...handlers, locationProxy],
+              handle: [...handlers, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
               terminal: true,
             });
           }
@@ -1975,7 +1991,7 @@ async function buildProxyRoutes(
           }
 
           for (const rule of locationRules) {
-            const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+            const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
               rule,
               Boolean(row.skipHttpsHostnameValidation),
               Boolean(row.preserveHostHeader)
@@ -1983,7 +1999,7 @@ async function buildProxyRoutes(
             if (!safePath) continue;
             hostRoutes.push({
               match: [{ host: domainGroup, path: [safePath], expression: hostTrustedFingerprintExpression }],
-              handle: [...handlers, locationProxy],
+              handle: [...handlers, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
               terminal: true,
             });
             hostRoutes.push({
@@ -1998,7 +2014,7 @@ async function buildProxyRoutes(
         }
 
         for (const rule of locationRules) {
-          const { safePath, reverseProxyHandler: locationProxy } = buildLocationReverseProxy(
+          const { safePath, reverseProxyHandler: locationProxy, rewriteHandler } = buildLocationReverseProxy(
             rule,
             Boolean(row.skipHttpsHostnameValidation),
             Boolean(row.preserveHostHeader)
@@ -2006,7 +2022,7 @@ async function buildProxyRoutes(
           if (!safePath) continue;
           hostRoutes.push({
             match: [{ host: domainGroup, path: [safePath] }],
-            handle: [...handlers, locationProxy],
+            handle: [...handlers, ...(rewriteHandler ? [rewriteHandler] : []), locationProxy],
             terminal: true,
           });
         }

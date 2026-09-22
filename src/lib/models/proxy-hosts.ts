@@ -87,12 +87,18 @@ export type LocationRule = {
   path: string;      // Caddy path pattern, e.g. "/ws/*", "/api/*"
   upstreams: string[]; // e.g. ["backend:8080", "backend2:8080"]
   loadBalancer: LoadBalancerConfig | null; // optional per-rule load balancing / health checks
+  // Rewrites the matched path prefix (the rule's `path` with a trailing "/*" or
+  // "*" stripped) before proxying. undefined/null: forward the path unchanged.
+  // "": strip the matched prefix (nginx trailing-slash proxy_pass equivalent).
+  // Any other string: replace the matched prefix with it (proxy_pass URI remap).
+  rewriteTo: string | null;
 };
 
 export type LocationRuleInput = {
   path: string;
   upstreams: string[];
   loadBalancer?: LoadBalancerInput | null;
+  rewriteTo?: string | null;
 };
 
 // Stored (meta JSON) shape of a location rule. The load balancer is held in the
@@ -101,6 +107,7 @@ export type LocationRuleMeta = {
   path: string;
   upstreams: string[];
   load_balancer?: LoadBalancerMeta;
+  rewrite_to?: string;
 };
 
 export const PATH_BLOCK_STATUS_CODES = [400, 401, 403, 404, 410, 418, 451, 500, 502, 503] as const;
@@ -1166,6 +1173,8 @@ function sanitizeLocationRuleMetas(value: unknown): LocationRuleMeta[] {
     const rule: LocationRuleMeta = base;
     const lb = sanitizeLoadBalancerMeta((item as { load_balancer?: LoadBalancerMeta }).load_balancer);
     if (lb) rule.load_balancer = lb;
+    const rewriteTo = (item as { rewrite_to?: unknown }).rewrite_to;
+    if (typeof rewriteTo === "string") rule.rewrite_to = rewriteTo;
     valid.push(rule);
   }
   return valid;
@@ -1183,6 +1192,8 @@ function normalizeLocationRulesInput(value: unknown): LocationRuleMeta[] {
     const lbInput = (item as { loadBalancer?: LoadBalancerInput | null }).loadBalancer;
     const lb = normalizeLoadBalancerInput(lbInput ?? null, undefined);
     if (lb) rule.load_balancer = lb;
+    const rewriteTo = (item as { rewriteTo?: unknown }).rewriteTo;
+    if (typeof rewriteTo === "string") rule.rewrite_to = rewriteTo;
     valid.push(rule);
   }
   return valid;
@@ -1194,6 +1205,7 @@ function hydrateLocationRules(metaRules: LocationRuleMeta[] | undefined): Locati
     path: rule.path,
     upstreams: rule.upstreams,
     loadBalancer: hydrateLoadBalancer(rule.load_balancer),
+    rewriteTo: rule.rewrite_to ?? null,
   }));
 }
 
@@ -1204,6 +1216,7 @@ function dehydrateLocationRules(rules: LocationRule[]): LocationRuleMeta[] {
     const meta: LocationRuleMeta = { path: rule.path, upstreams: rule.upstreams };
     const lb = dehydrateLoadBalancer(rule.loadBalancer);
     if (lb) meta.load_balancer = lb;
+    if (typeof rule.rewriteTo === "string") meta.rewrite_to = rule.rewriteTo;
     return meta;
   });
 }

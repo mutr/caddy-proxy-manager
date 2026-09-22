@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trash2, Plus, MinusCircle } from "lucide-react";
 import type { LocationRule, LoadBalancerConfig } from "@/lib/models/proxy-hosts";
@@ -19,13 +20,23 @@ function serializeUpstream(entry: UpstreamEntry): string {
   return `${entry.protocol}${entry.address.trim()}`;
 }
 
-type RuleState = { path: string; upstreams: UpstreamEntry[]; loadBalancer: LoadBalancerConfig | null };
+// rewriteEnabled tracks whether rewriteTo is set at all (distinct from an
+// empty string, which means "strip the matched prefix").
+type RuleState = {
+  path: string;
+  upstreams: UpstreamEntry[];
+  loadBalancer: LoadBalancerConfig | null;
+  rewriteEnabled: boolean;
+  rewriteTo: string;
+};
 
 function toState(rules: LocationRule[]): RuleState[] {
   return rules.map((r) => ({
     path: r.path,
     upstreams: r.upstreams.length > 0 ? r.upstreams.map(parseUpstream) : [{ protocol: "http://", address: "" }],
     loadBalancer: r.loadBalancer ?? null,
+    rewriteEnabled: r.rewriteTo !== null && r.rewriteTo !== undefined,
+    rewriteTo: r.rewriteTo ?? "",
   }));
 }
 
@@ -39,6 +50,7 @@ function toJson(rules: RuleState[]): string {
           .filter((u) => u.address.trim())
           .map(serializeUpstream),
         loadBalancer: r.loadBalancer?.enabled ? r.loadBalancer : null,
+        rewriteTo: r.rewriteEnabled ? r.rewriteTo.trim() : undefined,
       }))
       .filter((r) => r.upstreams.length > 0)
   );
@@ -50,7 +62,10 @@ export function LocationRulesFields({ initialData = [] }: Props) {
   const [rules, setRules] = useState<RuleState[]>(toState(initialData));
 
   const addRule = () =>
-    setRules((r) => [...r, { path: "", upstreams: [{ protocol: "http://", address: "" }], loadBalancer: null }]);
+    setRules((r) => [
+      ...r,
+      { path: "", upstreams: [{ protocol: "http://", address: "" }], loadBalancer: null, rewriteEnabled: false, rewriteTo: "" },
+    ]);
 
   const removeRule = (i: number) =>
     setRules((r) => r.filter((_, idx) => idx !== i));
@@ -60,6 +75,12 @@ export function LocationRulesFields({ initialData = [] }: Props) {
 
   const updateLoadBalancer = (i: number, value: LoadBalancerConfig | null) =>
     setRules((r) => r.map((rule, idx) => (idx === i ? { ...rule, loadBalancer: value } : rule)));
+
+  const updateRewriteEnabled = (i: number, value: boolean) =>
+    setRules((r) => r.map((rule, idx) => (idx === i ? { ...rule, rewriteEnabled: value } : rule)));
+
+  const updateRewriteTo = (i: number, value: string) =>
+    setRules((r) => r.map((rule, idx) => (idx === i ? { ...rule, rewriteTo: value } : rule)));
 
   const addUpstream = (ruleIdx: number) =>
     setRules((r) =>
@@ -177,6 +198,32 @@ export function LocationRulesFields({ initialData = [] }: Props) {
                     Add Upstream
                   </Button>
                 </div>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id={`location-rewrite-${i}`}
+                    checked={rule.rewriteEnabled}
+                    onCheckedChange={(checked) => updateRewriteEnabled(i, checked === true)}
+                  />
+                  <label htmlFor={`location-rewrite-${i}`} className="text-sm cursor-pointer">
+                    Rewrite path prefix before proxying
+                  </label>
+                </div>
+                {rule.rewriteEnabled && (
+                  <div className="mt-1">
+                    <Input
+                      value={rule.rewriteTo}
+                      onChange={(e) => updateRewriteTo(i, e.target.value)}
+                      placeholder="/repository/docker_io/v2 (leave blank to strip the matched prefix)"
+                      className="h-8 text-sm"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1 px-1">
+                      Replaces the matched prefix (this rule&apos;s path, without a trailing wildcard) with the value
+                      above before the request reaches the upstream. Leave blank to strip the prefix entirely.
+                    </p>
+                  </div>
+                )}
               </div>
               <LocationLoadBalancerFields
                 value={rule.loadBalancer}
