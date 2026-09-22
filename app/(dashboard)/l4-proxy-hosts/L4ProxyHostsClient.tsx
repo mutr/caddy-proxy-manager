@@ -34,6 +34,16 @@ function formatMatcher(host: L4ProxyHost): string {
   switch (host.matcherType) {
     case "tls_sni":    return `SNI: ${host.matcherValue.join(", ")}`;
     case "http_host":  return `Host: ${host.matcherValue.join(", ")}`;
+    case "ssh":        return "SSH";
+    case "regexp":     return `Regexp${host.regexpMatcher?.hex ? " (hex)" : ""}: ${host.matcherValue[0] ?? ""}`;
+    case "rdp":         return "RDP";
+    case "socks4":      return "SOCKS4";
+    case "socks5":      return "SOCKS5";
+    case "wireguard":   return "WireGuard";
+    case "xmpp":        return "XMPP";
+    case "postgres":    return "PostgreSQL";
+    case "winbox":      return "Winbox (MikroTik)";
+    case "openvpn":     return "OpenVPN";
     case "proxy_protocol": return "Proxy Protocol";
     default:           return "None";
   }

@@ -7,7 +7,25 @@ import {
   updateL4ProxyHostAction,
 } from "@/app/(dashboard)/l4-proxy-hosts/actions";
 import { INITIAL_ACTION_STATE } from "@/lib/actions";
-import type { L4ProxyHost } from "@/lib/models/l4-proxy-hosts";
+import type { L4MatcherType, L4ProxyHost } from "@/lib/models/l4-proxy-hosts";
+import {
+  L4_REGEXP_DEFAULT_COUNT,
+  L4_REGEXP_MAX_COUNT,
+  MSSQL_TDS_PRELOGIN_REGEXP,
+} from "@/lib/l4-matchers";
+import { Button } from "@/components/ui/button";
+
+const PROTOCOL_SIGNATURE_HELP: Partial<Record<L4MatcherType, string>> = {
+  rdp: "Matches the RDP (X.224/TPKT) connection request. TCP only.",
+  socks4: "Matches a SOCKS4/4a CONNECT or BIND request. TCP only.",
+  socks5: "Matches a SOCKS5 client greeting. TCP only.",
+  wireguard: "Matches a WireGuard handshake initiation or keepalive message. WireGuard normally runs over UDP.",
+  xmpp: "Matches an XMPP stream opening tag.",
+  postgres: "Matches a PostgreSQL startup/SSLRequest message. TCP only.",
+  winbox: "Matches a MikroTik Winbox authentication request. TCP only.",
+  openvpn: "Matches an OpenVPN control channel handshake (TCP or UDP).",
+};
+const PROTOCOL_SIGNATURE_MATCHERS = new Set(Object.keys(PROTOCOL_SIGNATURE_HELP) as L4MatcherType[]);
 import { AppDialog } from "@/components/ui/AppDialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -83,9 +101,16 @@ function L4HostForm({
 }) {
   const [enabled, setEnabled] = useState(initialData?.enabled ?? true);
   const [protocol, setProtocol] = useState(initialData?.protocol ?? "tcp");
-  const [matcherType, setMatcherType] = useState(
+  const [matcherType, setMatcherType] = useState<L4MatcherType>(
     initialData?.matcherType ?? "none"
   );
+  const [regexpPattern, setRegexpPattern] = useState(
+    initialData?.matcherType === "regexp" ? (initialData.matcherValue[0] ?? "") : ""
+  );
+  const [regexpCount, setRegexpCount] = useState(
+    String(initialData?.regexpMatcher?.count ?? L4_REGEXP_DEFAULT_COUNT)
+  );
+  const [regexpHex, setRegexpHex] = useState(initialData?.regexpMatcher?.hex ?? false);
 
   const defaultLbAccordion = initialData?.loadBalancer?.enabled
     ? "load-balancer"
@@ -205,9 +230,7 @@ function L4HostForm({
           name="matcherType"
           value={matcherType}
           onValueChange={(v) =>
-            setMatcherType(
-              v as "none" | "tls_sni" | "http_host" | "proxy_protocol"
-            )
+            setMatcherType(v as L4MatcherType)
           }
         >
           <SelectTrigger id="matcherType">
@@ -218,6 +241,16 @@ function L4HostForm({
             <SelectItem value="tls_sni">TLS SNI</SelectItem>
             <SelectItem value="http_host">HTTP Host</SelectItem>
             <SelectItem value="proxy_protocol">Proxy Protocol</SelectItem>
+            <SelectItem value="ssh">SSH</SelectItem>
+            <SelectItem value="rdp">RDP</SelectItem>
+            <SelectItem value="socks4">SOCKS4</SelectItem>
+            <SelectItem value="socks5">SOCKS5</SelectItem>
+            <SelectItem value="wireguard">WireGuard</SelectItem>
+            <SelectItem value="xmpp">XMPP</SelectItem>
+            <SelectItem value="postgres">PostgreSQL</SelectItem>
+            <SelectItem value="winbox">Winbox (MikroTik)</SelectItem>
+            <SelectItem value="openvpn">OpenVPN</SelectItem>
+            <SelectItem value="regexp">Raw bytes (regexp)</SelectItem>
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
@@ -240,6 +273,78 @@ function L4HostForm({
             required
           />
         </FormField>
+      )}
+
+      {matcherType === "ssh" && (
+        <p className="text-xs text-muted-foreground">
+          Matches connections that begin with the SSH identification string
+          (&quot;SSH-&quot;). The client must send its banner first, which
+          OpenSSH does.
+        </p>
+      )}
+
+      {PROTOCOL_SIGNATURE_MATCHERS.has(matcherType) && (
+        <p className="text-xs text-muted-foreground">
+          {PROTOCOL_SIGNATURE_HELP[matcherType]}
+        </p>
+      )}
+
+      {matcherType === "regexp" && (
+        <div className="flex flex-col gap-3 rounded-lg border p-3">
+          <FormField
+            label="Pattern"
+            htmlFor="matcherValue"
+            helperText="Go (RE2) regular expression, evaluated against the first bytes of the connection. Anchor it with ^."
+          >
+            <Input
+              id="matcherValue"
+              name="matcherValue"
+              value={regexpPattern}
+              onChange={(e) => setRegexpPattern(e.target.value)}
+              placeholder="^12(00|01)0[0-9A-F]{3}0000[0-9A-F]{2}00$"
+              className="font-mono"
+              required
+            />
+          </FormField>
+          <FormField
+            label="Bytes to inspect"
+            htmlFor="regexpCount"
+            helperText={`Bytes read before matching (1-${L4_REGEXP_MAX_COUNT}). The connection is closed if the client sends fewer within the matching timeout.`}
+          >
+            <Input
+              id="regexpCount"
+              name="regexpCount"
+              type="number"
+              min={1}
+              max={L4_REGEXP_MAX_COUNT}
+              value={regexpCount}
+              onChange={(e) => setRegexpCount(e.target.value)}
+            />
+          </FormField>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="regexpHex"
+              checked={regexpHex}
+              onCheckedChange={setRegexpHex}
+            />
+            <input type="hidden" name="regexpHex" value={regexpHex ? "on" : ""} />
+            <Label htmlFor="regexpHex">Match uppercase hex encoding of the bytes</Label>
+          </div>
+          <div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setRegexpPattern(MSSQL_TDS_PRELOGIN_REGEXP.pattern);
+                setRegexpCount(String(MSSQL_TDS_PRELOGIN_REGEXP.count));
+                setRegexpHex(MSSQL_TDS_PRELOGIN_REGEXP.hex);
+              }}
+            >
+              Use MSSQL (TDS PRELOGIN) preset
+            </Button>
+          </div>
+        </div>
       )}
 
       {protocol === "tcp" && (

@@ -1927,8 +1927,8 @@ const spec = {
           protocol: { type: "string", enum: ["tcp", "udp"] },
           listenAddress: { type: "string", example: ":5432", description: "Single host:port or :port to listen on" },
           upstreams: { type: "array", items: { type: "string" }, example: ["db-server:5432"] },
-          matcherType: { type: "string", enum: ["none", "tls_sni", "http_host", "proxy_protocol"] },
-          matcherValue: { type: "array", items: { type: "string" }, description: "Match values for tls_sni / http_host (empty otherwise)" },
+          matcherType: { type: "string", enum: ["none", "tls_sni", "http_host", "proxy_protocol", "ssh", "regexp", "rdp", "socks4", "socks5", "wireguard", "xmpp", "postgres", "winbox", "openvpn"] },
+          matcherValue: { type: "array", items: { type: "string" }, description: "Match values: hostnames for tls_sni / http_host, a single Go (RE2) pattern for regexp (empty otherwise)" },
           tlsTermination: { type: "boolean" },
           proxyProtocolVersion: { type: ["string", "null"], enum: ["v1", "v2", null] },
           proxyProtocolReceive: { type: "boolean", description: "Trust inbound PROXY protocol header from upstream LBs" },
@@ -1938,6 +1938,19 @@ const spec = {
           upstreamDnsResolution: { oneOf: [{ $ref: "#/components/schemas/UpstreamDnsResolutionConfig" }, { type: "null" }] },
           geoblock: { oneOf: [{ $ref: "#/components/schemas/GeoBlockConfig" }, { type: "null" }] },
           geoblockMode: { type: "string", enum: ["merge", "override"] },
+          regexpMatcher: {
+            oneOf: [
+              {
+                type: "object",
+                properties: {
+                  hex: { type: "boolean", description: "Match the uppercase hex encoding of the bytes instead of the raw bytes" },
+                  count: { type: "integer", minimum: 1, maximum: 16384, default: 8, description: "Bytes to read before matching" },
+                },
+              },
+              { type: "null" },
+            ],
+            description: "Parameters for matcherType=regexp",
+          },
           createdAt: { type: "string", format: "date-time" },
           updatedAt: { type: "string", format: "date-time" },
         },
@@ -1950,7 +1963,7 @@ const spec = {
           protocol: { type: "string", enum: ["tcp", "udp"] },
           listenAddress: { type: "string", example: ":5432", description: "Single host:port or :port" },
           upstreams: { type: "array", items: { type: "string" }, example: ["db:5432"] },
-          matcherType: { type: "string", enum: ["none", "tls_sni", "http_host", "proxy_protocol"] },
+          matcherType: { type: "string", enum: ["none", "tls_sni", "http_host", "proxy_protocol", "ssh", "regexp", "rdp", "socks4", "socks5", "wireguard", "xmpp", "postgres", "winbox", "openvpn"] },
           matcherValue: { type: "array", items: { type: "string" } },
           tlsTermination: { type: "boolean" },
           proxyProtocolVersion: { type: ["string", "null"], enum: ["v1", "v2", null] },
@@ -1961,6 +1974,19 @@ const spec = {
           upstreamDnsResolution: { oneOf: [{ $ref: "#/components/schemas/UpstreamDnsResolutionConfig" }, { type: "null" }] },
           geoblock: { oneOf: [{ $ref: "#/components/schemas/GeoBlockConfig" }, { type: "null" }] },
           geoblockMode: { type: "string", enum: ["merge", "override"] },
+          regexpMatcher: {
+            oneOf: [
+              {
+                type: "object",
+                properties: {
+                  hex: { type: "boolean", description: "Match the uppercase hex encoding of the bytes instead of the raw bytes" },
+                  count: { type: "integer", minimum: 1, maximum: 16384, default: 8, description: "Bytes to read before matching" },
+                },
+              },
+              { type: "null" },
+            ],
+            description: "Parameters for matcherType=regexp",
+          },
         },
         required: ["name", "listenAddress", "upstreams", "protocol"],
       },
