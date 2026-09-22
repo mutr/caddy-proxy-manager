@@ -87,8 +87,14 @@ const SelectContent = React.forwardRef<
       <SelectPrimitive.Viewport
         className={cn(
           "p-1",
+          // Deliberately NOT constraining height to --radix-select-trigger-height
+          // (the shadcn/ui default): pinning the viewport to the trigger's own
+          // height breaks mouse-wheel scrolling on long lists (Radix falls back
+          // to its small up/down chevron buttons only). SelectContent's own
+          // max-h-[--radix-select-content-available-height] still caps overall
+          // popup height, so this just lets the viewport size to its content.
           position === "popper" &&
-            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+            "w-full min-w-[var(--radix-select-trigger-width)]"
         )}
       >
         {children}
