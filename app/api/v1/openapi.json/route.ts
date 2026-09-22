@@ -1799,9 +1799,9 @@ const spec = {
       },
       RewriteConfig: {
         type: "object",
-        description: "Path rewrite (strip prefix)",
+        description: "Host-level path rewrite: prepends a prefix to every request before proxying",
         properties: {
-          path_prefix: { type: "string", example: "/app", description: "Prefix to strip from request path" },
+          path_prefix: { type: "string", example: "/app", description: "Prefix to prepend to every request path before proxying (e.g. /app -> /app/original/path)" },
         },
         required: ["path_prefix"],
       },
